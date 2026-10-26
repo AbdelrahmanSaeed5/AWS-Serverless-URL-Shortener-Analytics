@@ -1,0 +1,23 @@
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  font-family: Inter, system-ui, Arial, sans-serif;
+  color: #f1f5f9;
+  background: #0b1120;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button, input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}

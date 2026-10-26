@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: LinkForge - AWS Serverless URL Shortener and Analytics
+
+Globals:
+  Function:
+    Runtime: python3.14
+    MemorySize: 128
+    Timeout: 10
+
+Resources:
+  LinksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LinkForgeLinks
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: shortCode
+          AttributeType: S
+        - AttributeName: ownerId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: shortCode
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerIndex
+          KeySchema:
+            - AttributeName: ownerId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LinkForgeUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: LinkForgeUsers
+      UserPoolTier: LITE
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      UsernameConfiguration:
+        CaseSensitive: false
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+
+  LinkForgeUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: LinkForgeWebClient
+      UserPoolId: !Ref LinkForgeUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  LinkForgeApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      DefinitionBody:
+        openapi: '3.0.1'
+        info:
+          title: LinkForge API
+          version: '1.0'
+        paths: {}
+      CorsConfiguration:
+        AllowOrigins:
+          - http://localhost:5173
+        AllowHeaders:
+          - authorization
+          - content-type
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - OPTIONS
+      Auth:
+        DefaultAuthorizer: LinkForgeJWT
+        Authorizers:
+          LinkForgeJWT:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${LinkForgeUserPool}'
+              audience:
+                - !Ref LinkForgeUserPoolClient
+
+  CreateLinkFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: LinkForgeCreateLink
+      CodeUri: ../backend/functions/links/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          LINKS_TABLE: !Ref LinksTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt LinksTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub '${LinksTable.Arn}/index/OwnerIndex'
+      Events:
+        ListLinksEndpoint:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LinkForgeApi
+            Path: /links
+            Method: GET
+            PayloadFormatVersion: '2.0'
+        LinkStatsEndpoint:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LinkForgeApi
+            Path: /links/{code}/stats
+            Method: GET
+            PayloadFormatVersion: '2.0'
+        UpdateLinkEndpoint:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LinkForgeApi
+            Path: /links/{code}
+            Method: PATCH
+            PayloadFormatVersion: '2.0'
+        CreateLinkEndpoint:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LinkForgeApi
+            Path: /links
+            Method: POST
+            PayloadFormatVersion: '2.0'
+
+  RedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: LinkForgeRedirect
+      CodeUri: ../backend/functions/redirect/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          LINKS_TABLE: !Ref LinksTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt LinksTable.Arn
+      Events:
+        RedirectEndpoint:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LinkForgeApi
+            Path: /r/{code}
+            Method: GET
+            PayloadFormatVersion: '2.0'
+            Auth:
+              Authorizer: NONE
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for LinkForge HTTP API
+    Value: !Sub 'https://${LinkForgeApi}.execute-api.${AWS::Region}.amazonaws.com'
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref LinkForgeUserPool
+  UserPoolClientId:
+    Description: Cognito public web app client ID
+    Value: !Ref LinkForgeUserPoolClient
+  DeploymentRegion:
+    Description: AWS region used for deployment
+    Value: !Ref AWS::Region

@@ -1,0 +1,31 @@
+# Local environment and AWS credentials
+.env
+.env.*
+!.env.example
+.aws/
+.aws-sam/
+samconfig.toml
+
+# JavaScript build outputs and dependencies
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+coverage/
+
+# Python environments, compiled files, and test caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary backups and downloads
+backup-step*/
+*.zip
